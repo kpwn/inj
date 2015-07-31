@@ -14,6 +14,7 @@ inject_t libinj_inject_pid (pid_t pid)
     kern_return_t kr = task_for_pid(mach_task_self_, pid, &pt);
     if (!pt || kr) {
         printf("task_for_pid error: %s\n", mach_error_string(kr));
+        return 0;
     }
     return pt;
 }
@@ -77,11 +78,11 @@ void* map_segment(inject_t task, uint64_t hint_addr, char* segname, void* task_a
                     return ret;
                 }
             }
+            loadCmd = (struct load_command* ) (((char*)loadCmd) + loadCmd->cmdsize);
             if ((char*)loadCmd > (mhi->sizeofcmds + (char*)mhi)) {
                 printf("inconsistent sizeofcmds / ncmds\n");
                 break;
             }
-            loadCmd = (struct load_command* ) (((char*)loadCmd) + loadCmd->cmdsize);
         }
     } else if (header->magic == MH_MAGIC) {
         struct mach_header* mhi = (struct mach_header*) header;
@@ -139,11 +140,11 @@ void* map_segment(inject_t task, uint64_t hint_addr, char* segname, void* task_a
                     return ret;
                 }
             }
+            loadCmd = (struct load_command* ) (((char*)loadCmd) + loadCmd->cmdsize);
             if ((char*)loadCmd > (mhi->sizeofcmds + (char*)mhi)) {
                 printf("inconsistent sizeofcmds / ncmds\n");
                 break;
             }
-            loadCmd = (struct load_command* ) (((char*)loadCmd) + loadCmd->cmdsize);
         }
     }
     return 0;

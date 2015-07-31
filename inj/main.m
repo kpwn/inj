@@ -44,6 +44,9 @@ int main(int argc, const char * argv[]) {
         return -1;
     }
     inject_t inj = libinj_inject_pid(atoi(argv[1]));
+    if(!inj) {
+        return -1;
+    }
     void* rop_page = libinj_copyout(inj, &gadgets, &end_gadgets - &gadgets);
 
     char* str = malloc(2048);
