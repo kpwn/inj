@@ -100,7 +100,10 @@ int main(int argc, const char * argv[]) {
         mach_port_t remote_thread_port = libinj_create_thread(inj, remote_stack + (3600 * sizeof(uint64_t)), rop_page);
         printf("[+] injected a 64 bit task, cleaning up.. ");
         sleep(1);
-        thread_abort(remote_thread_port);
+        thread_terminate(remote_thread_port);
+        vm_deallocate(inj, (vm_address_t)remote_stack, sizeof(stack));
+        vm_deallocate(inj, (vm_address_t)rop_page,  (&end_gadgets - &gadgets));
+        vm_deallocate(inj, (vm_address_t)str_page, 2048);
         puts("done");
     } else {
         // gadgets are the same for both 64 and 32 bit intel x86
@@ -139,7 +142,10 @@ int main(int argc, const char * argv[]) {
         mach_port_t remote_thread_port = libinj_create_thread(inj, remote_stack + (2000 * 4), rop_page);
         printf("[+] injected a 32 bit task, cleaning up.. ");
         sleep(1);
-        thread_abort(remote_thread_port);
+        thread_terminate(remote_thread_port);
+        vm_deallocate(inj, (vm_address_t)remote_stack, sizeof(stack));
+        vm_deallocate(inj, (vm_address_t)rop_page,  (&end_gadgets - &gadgets));
+        vm_deallocate(inj, (vm_address_t)str_page, 2048);
         puts("done");
     }
     return 0;
