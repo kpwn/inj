@@ -1,4 +1,4 @@
-== inj - tfp dyld injection that doesn't suck ==
+== inj - tfp dylib injection that doesn't suck ==
 
 either compile with xcode or make
 
