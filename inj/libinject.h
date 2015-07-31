@@ -9,6 +9,13 @@
 #ifndef __inj__libinject__
 #define __inj__libinject__
 #import <Foundation/Foundation.h>
+#include <mach/mach.h>
+#include <mach/mach_types.h>
+#include <sys/types.h>
+#include <mach-o/nlist.h>
+#include <mach-o/loader.h>
+#include <mach/i386/thread_state.h>
+#include <mach-o/dyld_images.h>
 
 #include <stdio.h>
 #include <sys/types.h>

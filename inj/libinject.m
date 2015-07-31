@@ -7,13 +7,7 @@
 //
 
 #include "libinject.h"
-#include <mach/mach.h>
-#include <mach/mach_types.h>
-#include <sys/types.h>
-#include <mach-o/nlist.h>
-#include <mach-o/loader.h>
-#include <mach/i386/thread_state.h>
-#include <mach-o/dyld_images.h>
+
 inject_t libinj_inject_pid (pid_t pid)
 {
     mach_port_t pt = MACH_PORT_NULL;
@@ -89,6 +83,68 @@ void* map_segment(inject_t task, uint64_t hint_addr, char* segname, void* task_a
             }
             loadCmd = (struct load_command* ) (((char*)loadCmd) + loadCmd->cmdsize);
         }
+    } else if (header->magic == MH_MAGIC) {
+        struct mach_header* mhi = (struct mach_header*) header;
+        struct load_command *loadCmd = (struct load_command*) (mhi + 1);
+        
+        uint64_t vmaddr_slide = 0;
+        
+        for (uint32_t i=0; i < mhi->ncmds; i++) {
+            if (loadCmd->cmd == LC_SEGMENT) {
+                struct segment_command* segment = (struct segment_command*)loadCmd;
+                if (segment->fileoff == 0) { // header + load commmand segment
+                    vmaddr_slide = (uint64_t) task_addr - segment->vmaddr;
+                    break;
+                }
+            }
+            else if (loadCmd->cmd == LC_SEGMENT_64) {
+                struct segment_command_64* segment64 = (struct segment_command_64*)loadCmd;
+                if (segment64->fileoff == 0) { // header + load commmand segment
+                    vmaddr_slide = (uint64_t) task_addr - segment64->vmaddr;
+                    break;
+                }
+            }
+        }
+        
+        for (uint32_t i=0; i < mhi->ncmds; i++) {
+            if (loadCmd->cmd == LC_SEGMENT) {
+                struct segment_command* segment = (struct segment_command*)loadCmd;
+                if ((hint_addr == -1 || (segment->vmaddr < (uint32_t) hint_addr && segment->vmaddr + segment->vmsize
+                                         > (uint32_t)hint_addr)) && (!segname || strcmp(segment->segname, segname) == 0)) {
+                    char* ret = malloc(segment->vmsize);
+                    mach_vm_size_t osz = segment->vmsize;
+                    kern_return_t kr = mach_vm_read_overwrite(task, segment->vmaddr + vmaddr_slide, segment->vmsize, (mach_vm_address_t) ret, &osz);
+                    if (osz != segment->vmsize || kr) {
+                        puts("failed to map a segment");
+                        return NULL;
+                    }
+                    *fileoff = segment->fileoff;
+                    *vmaddr_slide_ = vmaddr_slide;
+                    return ret;
+                }
+            } else if (loadCmd->cmd == LC_SEGMENT_64) {
+                struct segment_command_64* segment64 = (struct segment_command_64*)loadCmd;
+                if ((hint_addr == -1 || (segment64->vmaddr < (uint64_t) hint_addr && segment64->vmaddr + segment64->vmsize
+                                         > hint_addr)) && (!segname || strcmp(segment64->segname, segname) == 0)) {
+                    char* ret = malloc(segment64->vmsize);
+                    mach_vm_size_t osz = segment64->vmsize;
+                    kern_return_t kr = mach_vm_read_overwrite(task, segment64->vmaddr + vmaddr_slide, segment64->vmsize, (mach_vm_address_t) ret, &osz);
+                    printf("LC_COMMAND64 at %p with %llu size\n", (void*)segment64->vmaddr+ vmaddr_slide, segment64->vmsize);
+                    if (osz != segment64->vmsize || kr) {
+                        puts("failed to map a segment");
+                        return NULL;
+                    }
+                    *fileoff = segment64->fileoff;
+                    *vmaddr_slide_ = vmaddr_slide;
+                    return ret;
+                }
+            }
+            if ((char*)loadCmd > (mhi->sizeofcmds + (char*)mhi)) {
+                printf("inconsistent sizeofcmds / ncmds\n");
+                break;
+            }
+            loadCmd = (struct load_command* ) (((char*)loadCmd) + loadCmd->cmdsize);
+        }
     }
     return 0;
 }
@@ -118,7 +174,7 @@ struct mach_header* libinj_main_header(inject_t inj) {
         } else {
             char* bin = malloc(size);
             mach_vm_size_t sz = 0;
-            // printf("region: %p -> %p (%lx bytes) - prot: %s%s%s\n", (void*)address, (void*)(address+size), size, info.protection&PROT_READ ? "r" : "-",info.protection&PROT_WRITE ? "w" : "-",info.protection&PROT_EXEC ? "x" : "-" );
+            printf("region: %p -> %p (%lx bytes) - prot: %s%s%s\n", (void*)address, (void*)(address+size), size, info.protection&PROT_READ ? "r" : "-",info.protection&PROT_WRITE ? "w" : "-",info.protection&PROT_EXEC ? "x" : "-" );
             
             if (info.protection&PROT_EXEC) {
                 if(mach_vm_read_overwrite(inj, address, size, (mach_vm_address_t)bin, (mach_vm_size_t*)&sz)) {
@@ -163,7 +219,7 @@ void* libinj_find_symbol(inject_t inj, char* name) {
         } else {
             char* bin = malloc(size);
             mach_vm_size_t sz = 0;
-           // printf("region: %p -> %p (%lx bytes) - prot: %s%s%s\n", (void*)address, (void*)(address+size), size, info.protection&PROT_READ ? "r" : "-",info.protection&PROT_WRITE ? "w" : "-",info.protection&PROT_EXEC ? "x" : "-" );
+            printf("region: %x/%p -> %p (%lx bytes) - prot: %s%s%s\n", (void*)address, (void*)address, (void*)(address+size), size, info.protection&PROT_READ ? "r" : "-",info.protection&PROT_WRITE ? "w" : "-",info.protection&PROT_EXEC ? "x" : "-" );
 
             if (info.protection&PROT_EXEC) {
                     if(mach_vm_read_overwrite(inj, address, size, (mach_vm_address_t)bin, (mach_vm_size_t*)&sz)) {
@@ -172,31 +228,45 @@ void* libinj_find_symbol(inject_t inj, char* name) {
                         if (*(uint32_t*) bin == MH_MAGIC) {
                             struct mach_header* hd = (struct mach_header*)bin;
                             if (hd->filetype == MH_EXECUTE) {
-                               // puts("main binary 32");
+                                puts("main binary 32");
                             } else if (hd->filetype == MH_DYLINKER) {
-                               // puts("dyld 32");
+                                puts("dyld 32");
                                 uint64_t dyld_img_info = libinj_sym_findbin(inj, address, (struct mach_header*)hd, "_dyld_all_image_infos");
+                                if (!dyld_img_info) {
+                                    puts("couldn't find dyld info");
+                                    return 0;
+                                }
                                 uint64_t fileoff=0, vmaddr_slide=0;
+                                
                                 void* data = map_segment(inj, -1, "__DATA", (void*)address, (struct mach_header*)hd, &fileoff, &vmaddr_slide);
+                                
                                 if (!data) {
+                                    puts("couldn't map data");
                                     return NULL;
                                 }
                                 struct dyld_all_image_infos *infos = (struct dyld_all_image_infos *)( (char*)data + dyld_img_info - fileoff - address);
-                                
-                                struct dyld_image_info* imginfo = (struct dyld_image_info* )((char*)data + (uint64_t)infos->infoArray - fileoff - address);
+                                struct dyld_image_info32 {
+                                    uint32	imageLoadAddress;	/* base address image is mapped into */
+                                    uint32					imageFilePath;		/* path dyld used to load the image */
+                                    uint32					imageFileModDate;	/* time_t of image file */
+                                    /* if stat().st_mtime of imageFilePath does not match imageFileModDate, */
+                                    /* then file has been modified since dyld loaded it */
+                                };
+
+                                struct dyld_image_info32* imginfo = (struct dyld_image_info* )((char*)data + (uint32_t)infos->infoArray - fileoff - address);
                                 
                                 for (int n=0; n < infos->infoArrayCount; n++) {
-                                    //printf("=> binary found: %p\n",imginfo[n].imageLoadAddress);
+                                    printf("=> binary found: %x\n",imginfo[n].imageLoadAddress);
                                     mach_vm_size_t sz=0;
                                     struct mach_header hdr;
-                                    mach_vm_read_overwrite(inj, imginfo[n].imageLoadAddress, sizeof(struct mach_header), &hdr, &sz);
+                                    mach_vm_read_overwrite(inj, (uint32_t)imginfo[n].imageLoadAddress, sizeof(struct mach_header), &hdr, &sz);
                                     if (sz != sizeof(struct mach_header)) {
                                         puts("couldn't read");
                                         return NULL;
                                     } else {
                                         if (hdr.magic == MH_MAGIC_64) {
                                             struct mach_header_64 hdr;
-                                            mach_vm_read_overwrite(inj, imginfo[n].imageLoadAddress, sizeof(struct mach_header_64), &hdr, &sz);
+                                            mach_vm_read_overwrite(inj, (uint32_t)imginfo[n].imageLoadAddress, sizeof(struct mach_header_64), &hdr, &sz);
                                             if (sz != sizeof(struct mach_header_64)) {
                                                 puts("couldn't read");
                                                 return NULL;
@@ -204,13 +274,13 @@ void* libinj_find_symbol(inject_t inj, char* name) {
                                             sz += hdr.sizeofcmds;
                                             char* lc = malloc(sz);
                                             mach_vm_size_t rsz = sz;
-                                            mach_vm_read_overwrite(inj, imginfo[n].imageLoadAddress, sz, lc, &rsz);
+                                            mach_vm_read_overwrite(inj, (uint32_t)imginfo[n].imageLoadAddress, sz, lc, &rsz);
                                             if (rsz != sz) {
                                                 puts("couldn't read lc");
                                                 free(lc);
                                                 continue;
                                             }
-                                            void* sym = libinj_sym_findbin(inj, imginfo[n].imageLoadAddress, (struct mach_header*)lc, "_system");
+                                            void* sym = libinj_sym_findbin(inj, (uint32_t)imginfo[n].imageLoadAddress, (struct mach_header*)lc, name);
                                             if (sym && sym > imginfo[n].imageLoadAddress) {
                                                 printf("=> sym found: %p\n", sym);
                                                 free(lc); free(data); free(bin);
@@ -222,15 +292,15 @@ void* libinj_find_symbol(inject_t inj, char* name) {
                                             sz += hdr.sizeofcmds;
                                             char* lc = malloc(sz);
                                             mach_vm_size_t rsz = sz;
-                                            mach_vm_read_overwrite(inj, imginfo[n].imageLoadAddress, sz, lc, &rsz);
+                                            mach_vm_read_overwrite(inj, (uint32_t)imginfo[n].imageLoadAddress, sz, lc, &rsz);
                                             if (rsz != sz) {
                                                 puts("couldn't read lc");
                                                 free(lc);
                                                 continue;
                                             }
-                                            void* sym = libinj_sym_findbin(inj, imginfo[n].imageLoadAddress, (struct mach_header*)lc, "_system");
+                                            void* sym = libinj_sym_findbin(inj, (uint32_t)imginfo[n].imageLoadAddress, (struct mach_header*)lc, name);
                                             if (sym) {
-                                                printf("=> sym found: %p\n", sym);
+                                                printf("=> sym found: %x\n", sym);
                                                 free(lc); free(data); free(bin);
                                                 return sym;
                                             }
@@ -250,6 +320,10 @@ void* libinj_find_symbol(inject_t inj, char* name) {
                             } else if (hd->filetype == MH_DYLINKER) {
                                 //puts("dyld 64");
                                 uint64_t dyld_img_info = libinj_sym_findbin(inj, address, (struct mach_header*)hd, "_dyld_all_image_infos");
+                                if (!dyld_img_info) {
+                                    puts("couldn't find dyld info");
+                                    return 0;
+                                }
                                 uint64_t fileoff=0, vmaddr_slide=0;
                                 void* data = map_segment(inj, -1, "__DATA", (void*)address, (struct mach_header*)hd, &fileoff, &vmaddr_slide);
                                 if (!data) {
@@ -303,7 +377,7 @@ void* libinj_find_symbol(inject_t inj, char* name) {
                                             }
                                             void* sym = libinj_sym_findbin(inj, (mach_vm_address_t)imginfo[n].imageLoadAddress, (struct mach_header*)lc, name);
                                             if (sym) {
-                                                printf("=> sym found: %p\n", sym);
+                                                printf("=> sym found: %x\n", sym);
                                                 free(lc); free(data); free(bin);
                                                 return sym;
                                             }
@@ -360,10 +434,57 @@ struct segment_command_64 *find_segment_64(struct mach_header_64 *mh, const char
     return fs;
 }
 
-struct load_command *find_load_command(struct mach_header_64 *mh, uint32_t cmd)
+struct section *find_section(struct segment_command *seg, const char *name)
+{
+    struct section *sect, *fs = NULL;
+    uint32_t i = 0;
+    for (i = 0, sect = (struct section *)((uint64_t)seg + (uint64_t)sizeof(struct segment_command));
+         i < seg->nsects;
+         i++, sect = (struct section*)((uint64_t)sect + sizeof(struct section)))
+    {
+        if (!strcmp(sect->sectname, name)) {
+            fs = sect;
+            break;
+        }
+    }
+    return fs;
+}
+
+struct segment_command *find_segment(struct mach_header *mh, const char *segname)
+{
+    struct load_command *lc;
+    struct segment_command *s, *fs = NULL;
+    lc = (struct load_command *)((uint64_t)mh + sizeof(struct mach_header));
+    while ((uint64_t)lc < (uint64_t)mh + (uint64_t)mh->sizeofcmds) {
+        if (lc->cmd == LC_SEGMENT) {
+            s = (struct segment_command *)lc;
+            if (!strcmp(s->segname, segname)) {
+                fs = s;
+                break;
+            }
+        }
+        lc = (struct load_command *)((uint64_t)lc + (uint64_t)lc->cmdsize);
+    }
+    return fs;
+}
+
+struct load_command *find_load_command_64(struct mach_header_64 *mh, uint32_t cmd)
 {
     struct load_command *lc, *flc;
     lc = (struct load_command *)((uint64_t)mh + sizeof(struct mach_header_64));
+    while ((uint64_t)lc < (uint64_t)mh + (uint64_t)mh->sizeofcmds) {
+        if (lc->cmd == cmd) {
+            flc = (struct load_command *)lc;
+            break;
+        }
+        lc = (struct load_command *)((uint64_t)lc + (uint64_t)lc->cmdsize);
+    }
+    return flc;
+}
+struct load_command *find_load_command(struct mach_header *mh, uint32_t cmd)
+{
+    struct load_command *lc, *flc;
+    lc = (struct load_command *)((uint64_t)mh + sizeof(struct mach_header));
     while ((uint64_t)lc < (uint64_t)mh + (uint64_t)mh->sizeofcmds) {
         if (lc->cmd == cmd) {
             flc = (struct load_command *)lc;
@@ -388,7 +509,7 @@ void* libinj_sym_findbin(inject_t task, void* addr, struct mach_header *mhi, con
             return (void*)NULL;
         }
         
-        symtab = (struct symtab_command *)find_load_command(mh, LC_SYMTAB);
+        symtab = (struct symtab_command *)find_load_command_64(mh, LC_SYMTAB);
         if (!symtab) {
             return (void*)NULL;
         }
@@ -425,8 +546,59 @@ void* libinj_sym_findbin(inject_t task, void* addr, struct mach_header *mhi, con
         free(linkedit_map);
         return ret_value;
 
-    } else return 0;
-    
+    } else if(mhi->magic == MH_MAGIC) {
+        struct mach_header *mh = (struct mach_header*)mhi;
+        struct symtab_command *symtab = NULL;
+        struct segment_command *linkedit = NULL;
+        
+        /*
+         * Find the LINKEDIT and SYMTAB sections
+         */
+        linkedit = find_segment(mh, SEG_LINKEDIT);
+        if (!linkedit) {
+            puts("no linkedit found");
+            return (void*)NULL;
+        }
+        
+        symtab = (struct symtab_command *)find_load_command(mh, LC_SYMTAB);
+        if (!symtab) {
+            return (void*)NULL;
+        }
+        uint64_t fileoff = 0;
+        uint64_t vmaddr_slide = 0;
+        void* linkedit_map = map_segment(task, -1, "__LINKEDIT", addr, mhi, &fileoff, &vmaddr_slide);
+        if  (!linkedit_map) return 0;
+        void* symtabp = symtab->stroff + 4 - fileoff + linkedit_map;
+        void* symtabz = symtab->stroff  - fileoff + linkedit_map;
+        void* symendp = symtab->stroff  - fileoff + linkedit_map + symtab->strsize - 0xA;
+        uint32_t idx = 0;
+        while (symtabp < symendp) {
+            if(strcmp(symtabp, name) == 0) goto found32;
+            symtabp += strlen((char*)symtabp) + 1;
+            idx++;
+        }
+        free(linkedit_map);
+        return (void*)NULL;
+    found32:;
+        struct nlist* nlp = (struct nlist*) (((uint32_t)(symtab->symoff))  - fileoff + linkedit_map);
+        uint64_t strx = ((char*)symtabp - (char*)symtabz);
+        unsigned int symp = 0;
+        while(symp <= (symtab->nsyms)) {
+            uint32_t strix = *((uint32_t*)nlp);
+            if(strix == strx)
+                goto found132;
+            nlp ++; //sizeof(struct nlist_64);
+            symp++;
+        }
+        return 0;
+    found132:;
+        //printf("[+] found symbol %s at 0x%016llx\n", name, nlp->n_value);
+        uint32 ret_value =  nlp->n_value + vmaddr_slide;
+        free(linkedit_map);
+        return (void*)ret_value;
+
+    }
+    return 0;
 }
 mach_port_t libinj_create_thread (inject_t inj, unsigned long* stack, void* initial_instr) {
     struct mach_header* x = libinj_main_header(inj);
