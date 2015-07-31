@@ -45,7 +45,7 @@ int main(int argc, const char * argv[]) {
     }
     inject_t inj = libinj_inject_pid(atoi(argv[1]));
     void* rop_page = libinj_copyout(inj, &gadgets, &end_gadgets - &gadgets);
-    printf("size is %lx\n", &end_gadgets - &gadgets);
+
     char* str = malloc(2048);
     bzero(str, 2048);
     strcpy(str+128, argv[2]);
@@ -95,8 +95,10 @@ int main(int argc, const char * argv[]) {
         vm_protect(inj, (vm_address_t)rop_page, (&end_gadgets - &gadgets), 0, PROT_READ | PROT_EXEC);
         
         mach_port_t remote_thread_port = libinj_create_thread(inj, remote_stack + (3600 * sizeof(uint64_t)), rop_page);
+        printf("[+] injected a 64 bit task, cleaning up.. ");
         sleep(1);
         thread_abort(remote_thread_port);
+        puts("done");
     } else {
         // gadgets are the same for both 64 and 32 bit intel x86
         uint32_t stack [4096];
@@ -131,11 +133,11 @@ int main(int argc, const char * argv[]) {
         
         vm_protect(inj, (vm_address_t)remote_stack, sizeof(stack), 0, PROT_READ | PROT_WRITE);
         vm_protect(inj, (vm_address_t)rop_page, (&end_gadgets - &gadgets), 0, PROT_READ | PROT_EXEC);
-        printf("%x - %x\n", remote_stack, rop_page);
         mach_port_t remote_thread_port = libinj_create_thread(inj, remote_stack + (2000 * 4), rop_page);
+        printf("[+] injected a 32 bit task, cleaning up.. ");
         sleep(1);
         thread_abort(remote_thread_port);
-
+        puts("done");
     }
     return 0;
 }

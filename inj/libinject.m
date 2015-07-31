@@ -129,7 +129,7 @@ void* map_segment(inject_t task, uint64_t hint_addr, char* segname, void* task_a
                     char* ret = malloc(segment64->vmsize);
                     mach_vm_size_t osz = segment64->vmsize;
                     kern_return_t kr = mach_vm_read_overwrite(task, segment64->vmaddr + vmaddr_slide, segment64->vmsize, (mach_vm_address_t) ret, &osz);
-                    printf("LC_COMMAND64 at %p with %llu size\n", (void*)segment64->vmaddr+ vmaddr_slide, segment64->vmsize);
+                    //printf("LC_COMMAND64 at %p with %llu size\n", (void*)segment64->vmaddr+ vmaddr_slide, segment64->vmsize);
                     if (osz != segment64->vmsize || kr) {
                         puts("failed to map a segment");
                         return NULL;
@@ -174,7 +174,7 @@ struct mach_header* libinj_main_header(inject_t inj) {
         } else {
             char* bin = malloc(size);
             mach_vm_size_t sz = 0;
-            printf("region: %p -> %p (%lx bytes) - prot: %s%s%s\n", (void*)address, (void*)(address+size), size, info.protection&PROT_READ ? "r" : "-",info.protection&PROT_WRITE ? "w" : "-",info.protection&PROT_EXEC ? "x" : "-" );
+            //printf("region: %p -> %p (%lx bytes) - prot: %s%s%s\n", (void*)address, (void*)(address+size), size, info.protection&PROT_READ ? "r" : "-",info.protection&PROT_WRITE ? "w" : "-",info.protection&PROT_EXEC ? "x" : "-" );
             
             if (info.protection&PROT_EXEC) {
                 if(mach_vm_read_overwrite(inj, address, size, (mach_vm_address_t)bin, (mach_vm_size_t*)&sz)) {
@@ -219,7 +219,7 @@ void* libinj_find_symbol(inject_t inj, char* name) {
         } else {
             char* bin = malloc(size);
             mach_vm_size_t sz = 0;
-            printf("region: %x/%p -> %p (%lx bytes) - prot: %s%s%s\n", (void*)address, (void*)address, (void*)(address+size), size, info.protection&PROT_READ ? "r" : "-",info.protection&PROT_WRITE ? "w" : "-",info.protection&PROT_EXEC ? "x" : "-" );
+            //printf("region: %x/%p -> %p (%lx bytes) - prot: %s%s%s\n", (void*)address, (void*)address, (void*)(address+size), size, info.protection&PROT_READ ? "r" : "-",info.protection&PROT_WRITE ? "w" : "-",info.protection&PROT_EXEC ? "x" : "-" );
 
             if (info.protection&PROT_EXEC) {
                     if(mach_vm_read_overwrite(inj, address, size, (mach_vm_address_t)bin, (mach_vm_size_t*)&sz)) {
@@ -228,9 +228,9 @@ void* libinj_find_symbol(inject_t inj, char* name) {
                         if (*(uint32_t*) bin == MH_MAGIC) {
                             struct mach_header* hd = (struct mach_header*)bin;
                             if (hd->filetype == MH_EXECUTE) {
-                                puts("main binary 32");
+                                //puts("main binary 32");
                             } else if (hd->filetype == MH_DYLINKER) {
-                                puts("dyld 32");
+                               // puts("dyld 32");
                                 uint64_t dyld_img_info = libinj_sym_findbin(inj, address, (struct mach_header*)hd, "_dyld_all_image_infos");
                                 if (!dyld_img_info) {
                                     puts("couldn't find dyld info");
@@ -256,7 +256,7 @@ void* libinj_find_symbol(inject_t inj, char* name) {
                                 struct dyld_image_info32* imginfo = (struct dyld_image_info* )((char*)data + (uint32_t)infos->infoArray - fileoff - address);
                                 
                                 for (int n=0; n < infos->infoArrayCount; n++) {
-                                    printf("=> binary found: %x\n",imginfo[n].imageLoadAddress);
+                                    //printf("=> binary found: %x\n",imginfo[n].imageLoadAddress);
                                     mach_vm_size_t sz=0;
                                     struct mach_header hdr;
                                     mach_vm_read_overwrite(inj, (uint32_t)imginfo[n].imageLoadAddress, sizeof(struct mach_header), &hdr, &sz);
