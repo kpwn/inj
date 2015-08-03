@@ -8,6 +8,35 @@
 
 #include "libinject.h"
 
+void* libinj_map_mem(inject_t inj, size_t size, uint64_t* remote_map_virtaddr) {
+    mach_vm_address_t local_vaddr=0;
+    kern_return_t kr = mach_vm_allocate(mach_task_self_, &local_vaddr, size, VM_FLAGS_ANYWHERE);
+    if (kr != KERN_SUCCESS || !local_vaddr) {
+        return 0;
+    }
+    mach_vm_protect(mach_task_self_, local_vaddr, size, 0, VM_PROT_READ|VM_PROT_WRITE);
+    if (remote_map_virtaddr) {
+        mach_port_t entry;
+        memory_object_size_t pagesz = round_page(size);
+        kr = mach_make_memory_entry_64(mach_task_self_, &pagesz, local_vaddr, VM_PROT_READ|VM_PROT_WRITE, &entry, MACH_PORT_NULL);
+        if (kr != KERN_SUCCESS) {
+            puts("failed to make memory entry");
+            mach_vm_deallocate(mach_task_self_, local_vaddr, size);
+            return 0;
+        }
+        *remote_map_virtaddr = 0;
+
+        kr = mach_vm_map(inj, remote_map_virtaddr, pagesz, 0, VM_FLAGS_ANYWHERE, entry, 0, 0, VM_PROT_READ|VM_PROT_WRITE, VM_PROT_READ|VM_PROT_WRITE, VM_INHERIT_NONE);
+        if (kr) {
+            printf("failed to map %s\n", mach_error_string(kr));
+            *remote_map_virtaddr = 0;
+            mach_vm_deallocate(mach_task_self_, local_vaddr, size);
+            return 0;
+        }
+    }
+    return (void*) local_vaddr;
+}
+
 inject_t libinj_inject_pid (pid_t pid)
 {
     mach_port_t pt = MACH_PORT_NULL;
@@ -54,7 +83,7 @@ void* map_segment(inject_t task, uint64_t hint_addr, char* segname, void* task_a
                     mach_vm_size_t osz = segment->vmsize;
                     kern_return_t kr = mach_vm_read_overwrite(task, segment->vmaddr + vmaddr_slide, segment->vmsize, (mach_vm_address_t) ret, &osz);
                     if (osz != segment->vmsize || kr) {
-                        puts("failed to map a segment");
+                        printf("[-] failed to map a segment, skipping 0x%x - %x bytes (%s)\n", segment->vmaddr, segment->vmsize, segment->segname);
                         return NULL;
                     }
                     *fileoff = segment->fileoff;
@@ -70,7 +99,7 @@ void* map_segment(inject_t task, uint64_t hint_addr, char* segname, void* task_a
                     kern_return_t kr = mach_vm_read_overwrite(task, segment64->vmaddr + vmaddr_slide, segment64->vmsize, (mach_vm_address_t) ret, &osz);
                     //printf("LC_COMMAND64 at %p with %llu size\n", (void*)segment64->vmaddr+ vmaddr_slide, segment64->vmsize);
                     if (osz != segment64->vmsize || kr) {
-                        puts("failed to map a segment");
+                        printf("[-] failed to map a segment, skipping 0x%llx - %llx bytes (%s)\n", segment64->vmaddr, segment64->vmsize, segment64->segname);
                         return NULL;
                     }
                     *fileoff = segment64->fileoff;
@@ -116,7 +145,7 @@ void* map_segment(inject_t task, uint64_t hint_addr, char* segname, void* task_a
                     mach_vm_size_t osz = segment->vmsize;
                     kern_return_t kr = mach_vm_read_overwrite(task, segment->vmaddr + vmaddr_slide, segment->vmsize, (mach_vm_address_t) ret, &osz);
                     if (osz != segment->vmsize || kr) {
-                        puts("failed to map a segment");
+                        printf("[-] failed to map a segment, skipping 0x%x - %x bytes (%s)\n", segment->vmaddr, segment->vmsize, segment->segname);
                         return NULL;
                     }
                     *fileoff = segment->fileoff;
@@ -132,7 +161,7 @@ void* map_segment(inject_t task, uint64_t hint_addr, char* segname, void* task_a
                     kern_return_t kr = mach_vm_read_overwrite(task, segment64->vmaddr + vmaddr_slide, segment64->vmsize, (mach_vm_address_t) ret, &osz);
                     //printf("LC_COMMAND64 at %p with %llu size\n", (void*)segment64->vmaddr+ vmaddr_slide, segment64->vmsize);
                     if (osz != segment64->vmsize || kr) {
-                        puts("failed to map a segment");
+                        printf("[-] failed to map a segment, skipping 0x%llx - %llx bytes (%s)\n", segment64->vmaddr, segment64->vmsize, segment64->segname);
                         return NULL;
                     }
                     *fileoff = segment64->fileoff;
@@ -283,7 +312,7 @@ void* libinj_find_symbol(inject_t inj, char* name) {
                                             }
                                             void* sym = libinj_sym_findbin(inj, (uint32_t)imginfo[n].imageLoadAddress, (struct mach_header*)lc, name);
                                             if (sym && sym > imginfo[n].imageLoadAddress) {
-                                                printf("=> sym found: %p\n", sym);
+                                                printf("[+] sym found: %p\n", sym);
                                                 free(lc); free(data); free(bin);
                                                 return sym;
                                             }
@@ -301,7 +330,7 @@ void* libinj_find_symbol(inject_t inj, char* name) {
                                             }
                                             void* sym = libinj_sym_findbin(inj, (uint32_t)imginfo[n].imageLoadAddress, (struct mach_header*)lc, name);
                                             if (sym) {
-                                                printf("=> sym found: %x\n", sym);
+                                                printf("[+] sym found: %x\n", sym);
                                                 free(lc); free(data); free(bin);
                                                 return sym;
                                             }
@@ -361,7 +390,7 @@ void* libinj_find_symbol(inject_t inj, char* name) {
                                             }
                                             void* sym = libinj_sym_findbin(inj, (mach_vm_address_t)imginfo[n].imageLoadAddress, (struct mach_header*)lc, name);
                                             if (sym && sym > imginfo[n].imageLoadAddress) {
-                                                printf("=> sym found: %p\n", sym);
+                                                printf("[+] sym found: %p\n", sym);
                                                 free(lc); free(data); free(bin);
                                                 return sym;
                                             }
@@ -378,7 +407,7 @@ void* libinj_find_symbol(inject_t inj, char* name) {
                                             }
                                             void* sym = libinj_sym_findbin(inj, (mach_vm_address_t)imginfo[n].imageLoadAddress, (struct mach_header*)lc, name);
                                             if (sym) {
-                                                printf("=> sym found: %x\n", sym);
+                                                printf("[+] sym found: %x\n", sym);
                                                 free(lc); free(data); free(bin);
                                                 return sym;
                                             }

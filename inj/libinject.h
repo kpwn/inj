@@ -26,4 +26,5 @@ void* libinj_find_symbol(inject_t inj, char* name);
 void libinj_find_regions(inject_t inj);
 struct mach_header* libinj_main_header(inject_t inj);
 void* libinj_copyout(inject_t inj, void* data, size_t size);
+void* libinj_map_mem(inject_t inj, size_t size, uint64_t* remote_map_virtaddr);
 #endif /* defined(__inj__libinject__) */
