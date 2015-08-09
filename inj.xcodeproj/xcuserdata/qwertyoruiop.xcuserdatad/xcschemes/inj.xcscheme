@@ -61,11 +61,11 @@
       </BuildableProductRunnable>
       <CommandLineArguments>
          <CommandLineArgument
-            argument = "14594"
+            argument = "19793"
             isEnabled = "YES">
          </CommandLineArgument>
          <CommandLineArgument
-            argument = "x"
+            argument = "yxn.dylib"
             isEnabled = "YES">
          </CommandLineArgument>
       </CommandLineArguments>

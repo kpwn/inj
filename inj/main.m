@@ -35,11 +35,10 @@ extern char ROP_HANG;
 
 extern char end_gadgets;
 
-char die(char* x) {
-    puts(x);
+int die(char* a, char* b) {
+    printf(a,b);
     exit(-1);
 }
-
 #define F(gd, page) (uint64_t)((&gd-&gadgets)+page)
 #define S(inj, nm) (uint64_t)(libinj_find_symbol(inj, nm))
 int main(int argc, const char * argv[]) {
@@ -125,6 +124,9 @@ int main(int argc, const char * argv[]) {
         
         while (1) {
             if (stack[0] == 0xF1F2F3F4) {
+                
+                usleep(10000); // sort of a race condition
+
                 vm_deallocate(inj, (vm_address_t)remote_stack, 4096*sizeof(uint64_t));
                 vm_deallocate(inj, (vm_address_t)rop_page,  (&end_gadgets - &gadgets));
                 vm_deallocate(inj, (vm_address_t)str_page, 4096);
